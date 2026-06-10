@@ -1,1 +1,7 @@
-target
+/target
+
+# Runtime SQLite database (per technical spec §3)
+/data
+
+# User config — may hold tokens (CryptoPanic key, Telegram bot token)
+config.toml

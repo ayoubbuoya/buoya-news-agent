@@ -2,5 +2,35 @@
 name = "buoya-news-mcp"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.96"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
 
 [dependencies]
+anyhow = "1.0.102"
+chrono = { version = "0.4.45", features = ["serde"] }
+feed-rs = "2.3.1"
+hex = "0.4.3"
+humantime = "2.3.0"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "gzip"] }
+rmcp = { version = "1.7.0", features = ["server", "transport-io"] }
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+schemars = { version = "1.2.1", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+sha2 = "0.11.0"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "time", "sync"] }
+toml = "1.1.2"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+url = "2.5.8"
+uuid = { version = "1.23.3", features = ["v4"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
