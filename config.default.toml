@@ -112,8 +112,8 @@ term = "open source"
 weight = 0.4
 
 [thresholds]
-critical_loss_usd = 10000000
-notable_loss_usd = 1000000
+critical_loss_usd = 10_000_000
+notable_loss_usd = 1_000_000
 critical_pct = 15.0
 notable_pct = 8.0
 critical_coverage = 4

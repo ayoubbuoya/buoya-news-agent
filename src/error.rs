@@ -23,3 +23,29 @@ pub enum ConfigError {
     #[error("invalid configuration: {0}")]
     Invalid(String),
 }
+
+/// Errors raised by the SQLite storage layer.
+#[derive(Debug, Error)]
+pub enum DbError {
+    #[error("failed to open database: {0}")]
+    Open(#[source] rusqlite::Error),
+
+    #[error("failed to apply schema: {0}")]
+    Migrate(#[source] rusqlite::Error),
+
+    #[error("database read failed: {0}")]
+    Read(#[source] rusqlite::Error),
+
+    #[error("database write failed: {0}")]
+    Write(#[source] rusqlite::Error),
+}
+
+/// Errors raised while fetching or parsing an upstream source.
+#[derive(Debug, Error)]
+pub enum FetchError {
+    #[error("http request failed: {0}")]
+    Http(#[source] reqwest::Error),
+
+    #[error("failed to parse feed: {0}")]
+    Parse(String),
+}
