@@ -232,6 +232,7 @@ impl TomlConfig {
 pub struct AppConfig {
     pub ai_api_key: String,
     pub ai_base_url: String,
+    pub ai_model: String,
     pub toml_config: TomlConfig,
 }
 
@@ -242,12 +243,15 @@ impl AppConfig {
         let ai_api_key = std::env::var("AI_API_KEY").expect("AI_API_KEY env var not set");
         let ai_base_url =
             std::env::var("AI_BASE_URL").unwrap_or(String::from("https://openrouter.ai/api/v1"));
+        let ai_model =
+            std::env::var("AI_MODEL").unwrap_or(String::from("openai/gpt-oss-20b:free"));
         let toml_config =
             TomlConfig::load(toml_config_path).expect("Failed to load toml config file");
 
         Self {
             ai_api_key,
             ai_base_url,
+            ai_model,
             toml_config,
         }
     }
