@@ -26,6 +26,14 @@ you find. Cite article titles and sources. If the database has nothing relevant,
 say so plainly instead of inventing details. For general questions unrelated to \
 stored news, answer directly without using the tools.";
 
+/// Build the system prompt for a conversation, appending the current UTC date and
+/// time so the model can answer time-relative questions ("latest", "this week",
+/// "yesterday") without guessing. Resolved per request from the clock.
+fn system_prompt() -> String {
+    let now = chrono::Utc::now().format("%A, %B %-d, %Y at %H:%M UTC");
+    format!("{SYSTEM_PROMPT}\n\nThe current date and time is {now}.")
+}
+
 /// Upper bound on tool-call rounds in a single turn, guarding against a model
 /// that loops on tool calls without ever producing a final answer.
 const MAX_TOOL_ROUNDS: usize = 5;
@@ -92,7 +100,7 @@ pub async fn prompt_stream(
     // Prepend the system prompt; it is not persisted in `history`.
     let mut messages: Vec<ChatCompletionRequestMessage> =
         Vec::with_capacity(history.len() + 1);
-    messages.push(ChatCompletionRequestSystemMessage::from(SYSTEM_PROMPT).into());
+    messages.push(ChatCompletionRequestSystemMessage::from(system_prompt()).into());
     messages.extend(history.iter().map(to_request_message));
 
     for _ in 0..MAX_TOOL_ROUNDS {
