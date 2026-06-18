@@ -21,6 +21,61 @@ name = "rekt"
 url = "https://rekt.news/rss/feed.xml"
 category = "security"
 
+[[sources.rss]]
+name = "theblock"
+url = "https://www.theblock.co/rss.xml"
+category = "crypto"
+
+[[sources.rss]]
+name = "decrypt"
+url = "https://decrypt.co/feed"
+category = "crypto"
+
+[[sources.rss]]
+name = "bitcoinmagazine"
+url = "https://bitcoinmagazine.com/feed"
+category = "crypto"
+
+[[sources.rss]]
+name = "bankless"
+url = "https://www.bankless.com/rss/feed"
+category = "crypto"
+
+[[sources.rss]]
+name = "thedefiant"
+url = "https://thedefiant.io/api/feed"
+category = "defi"
+
+[[sources.rss]]
+name = "ethereum-foundation"
+url = "https://blog.ethereum.org/en/feed.xml"
+category = "crypto"
+
+[[sources.rss]]
+name = "stellar"
+url = "https://www.stellar.org/blog/rss.xml"
+category = "crypto"
+
+[[sources.rss]]
+name = "hedera"
+url = "https://hedera.com/blog/rss.xml"
+category = "crypto"
+
+[[sources.rss]]
+name = "huggingface-blog"
+url = "https://huggingface.co/blog/feed.xml"
+category = "ai"
+
+[[sources.rss]]
+name = "bleepingcomputer"
+url = "https://www.bleepingcomputer.com/feed/"
+category = "security"
+
+[[sources.rss]]
+name = "krebsonsecurity"
+url = "https://krebsonsecurity.com/feed/"
+category = "security"
+
 
 [sources.defillama]
 enabled = true

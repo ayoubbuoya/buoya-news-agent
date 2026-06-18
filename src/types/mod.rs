@@ -10,6 +10,7 @@ pub enum Category {
     Ai,
     Security,
     Market,
+    Defi,
 }
 
 /// Author of a chat message. Persisted as a lowercase string in `chat_messages.role`.
