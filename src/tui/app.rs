@@ -23,8 +23,13 @@ pub enum Focus {
 #[derive(Debug, Clone)]
 pub enum Status {
     Idle,
-    /// A reply is streaming in; `partial` is the text received so far.
-    Streaming { partial: String, spinner_idx: usize },
+    /// A reply is streaming in; `partial` is the text received so far and
+    /// `tools` lists any tools the assistant has invoked this turn.
+    Streaming {
+        partial: String,
+        spinner_idx: usize,
+        tools: Vec<String>,
+    },
 }
 
 pub struct App {
@@ -280,6 +285,7 @@ impl App {
         self.status = Status::Streaming {
             partial: String::new(),
             spinner_idx: 0,
+            tools: Vec::new(),
         };
         Ok(())
     }
@@ -291,6 +297,12 @@ impl App {
             StreamEvent::Token(token) => {
                 if let Status::Streaming { partial, .. } = &mut self.status {
                     partial.push_str(&token);
+                }
+                Ok(false)
+            }
+            StreamEvent::ToolCall(label) => {
+                if let Status::Streaming { tools, .. } = &mut self.status {
+                    tools.push(label);
                 }
                 Ok(false)
             }
@@ -306,21 +318,22 @@ impl App {
     }
 
     async fn finish_stream(&mut self, error: Option<String>) -> Result<()> {
-        let partial = match std::mem::replace(&mut self.status, Status::Idle) {
-            Status::Streaming { partial, .. } => partial,
-            Status::Idle => String::new(),
+        let (partial, tools) = match std::mem::replace(&mut self.status, Status::Idle) {
+            Status::Streaming { partial, tools, .. } => (partial, tools),
+            Status::Idle => (String::new(), Vec::new()),
         };
 
         if let Some(session_id) = self.current_session_id.clone()
             && !partial.trim().is_empty()
         {
-            let msg = db::insert_message(
+            let mut msg = db::insert_message(
                 &self.state.db_pool,
                 &session_id,
                 Role::Assistant,
                 &partial,
             )
             .await?;
+            msg.tools_used = tools;
             self.messages.push(msg);
         }
 

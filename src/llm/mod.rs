@@ -36,6 +36,8 @@ const MAX_TOOL_ROUNDS: usize = 5;
 pub enum StreamEvent {
     /// A chunk of generated text to append to the in-progress reply.
     Token(String),
+    /// The assistant invoked a tool; carries a human-readable label for display.
+    ToolCall(String),
     /// The stream finished successfully.
     Done,
     /// The request failed; carries a human-readable message.
@@ -101,7 +103,7 @@ pub async fn prompt_stream(
             }
             Ok(TurnOutcome::Aborted) => return,
             Ok(TurnOutcome::ToolCalls(calls)) => {
-                if let Err(e) = run_tool_round(&pool, &mut messages, calls).await {
+                if let Err(e) = run_tool_round(&pool, &mut messages, calls, &tx).await {
                     let _ = tx.send(StreamEvent::Error(e.to_string()));
                     return;
                 }
@@ -202,6 +204,7 @@ async fn run_tool_round(
     pool: &SqlitePool,
     messages: &mut Vec<ChatCompletionRequestMessage>,
     calls: Vec<ToolCallAccum>,
+    tx: &UnboundedSender<StreamEvent>,
 ) -> Result<()> {
     let tool_calls: Vec<ChatCompletionMessageToolCalls> = calls
         .iter()
@@ -223,6 +226,10 @@ async fn run_tool_round(
 
     for call in calls {
         tracing::debug!("running tool {} with args {}", call.name, call.arguments);
+        let _ = tx.send(StreamEvent::ToolCall(describe_call(
+            &call.name,
+            &call.arguments,
+        )));
         let result = tools::execute(pool, &call.name, &call.arguments).await;
         let tool_msg = ChatCompletionRequestToolMessageArgs::default()
             .tool_call_id(call.id)
@@ -232,6 +239,27 @@ async fn run_tool_round(
     }
 
     Ok(())
+}
+
+/// Build a short, human-readable label for a tool call to show in the UI, e.g.
+/// `search_articles · "ethereum etf"`. Falls back to the bare tool name when the
+/// arguments cannot be parsed.
+fn describe_call(name: &str, arguments: &str) -> String {
+    let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
+    let detail = match name {
+        "search_articles" => args.get("query").and_then(|v| v.as_str()).map(|q| format!("\"{q}\"")),
+        "list_recent_articles" => args
+            .get("category")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .or(Some("recent".to_string())),
+        "get_article" => args.get("id").and_then(|v| v.as_i64()).map(|id| format!("#{id}")),
+        _ => None,
+    };
+    match detail {
+        Some(detail) => format!("{name} · {detail}"),
+        None => name.to_string(),
+    }
 }
 
 pub async fn prompt(app_state: &AppState, prompt: &str, model: &str) -> Result<String> {

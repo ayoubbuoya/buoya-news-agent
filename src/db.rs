@@ -142,6 +142,7 @@ pub async fn load_messages(pool: &SqlitePool, session_id: &str) -> Result<Vec<Ch
             role,
             content: row.get("content"),
             created_at: row.get("created_at"),
+            tools_used: Vec::new(),
         });
     }
 
@@ -184,6 +185,7 @@ pub async fn insert_message(
         role,
         content: content.to_string(),
         created_at: row.get("created_at"),
+        tools_used: Vec::new(),
     })
 }
 

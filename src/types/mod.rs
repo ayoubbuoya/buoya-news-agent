@@ -61,6 +61,10 @@ pub struct ChatMessage {
     pub role: Role,
     pub content: String,
     pub created_at: String,
+    /// Human-readable labels for any tools the assistant invoked while producing
+    /// this message. Shown in the UI for transparency; not persisted to the DB,
+    /// so it is empty for messages loaded from a previous session.
+    pub tools_used: Vec<String>,
 }
 
 /// What a fetcher returns: minimal, source-shaped, not yet scored or stored.

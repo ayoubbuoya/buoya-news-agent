@@ -69,11 +69,11 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
     for msg in &app.messages {
-        push_message(&mut lines, msg.role, &msg.content, width);
+        push_message(&mut lines, msg.role, &msg.content, &msg.tools_used, width);
     }
-    if let Status::Streaming { partial, .. } = &app.status {
+    if let Status::Streaming { partial, tools, .. } = &app.status {
         let shown = if partial.is_empty() { "…" } else { partial };
-        push_message(&mut lines, Role::Assistant, shown, width);
+        push_message(&mut lines, Role::Assistant, shown, tools, width);
     }
 
     let height = inner.height as usize;
@@ -88,8 +88,16 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(visible), inner);
 }
 
-/// Append a styled header line plus wrapped body lines for one message.
-fn push_message(lines: &mut Vec<Line<'static>>, role: Role, content: &str, width: usize) {
+/// Append a styled header line plus wrapped body lines for one message. Any
+/// `tools` the assistant invoked are listed as dim lines between the header and
+/// the body.
+fn push_message(
+    lines: &mut Vec<Line<'static>>,
+    role: Role,
+    content: &str,
+    tools: &[String],
+    width: usize,
+) {
     let (label, color) = match role {
         Role::User => ("You", Color::Green),
         Role::Assistant => ("Assistant", Color::Cyan),
@@ -99,6 +107,15 @@ fn push_message(lines: &mut Vec<Line<'static>>, role: Role, content: &str, width
         label.to_string(),
         Style::default().fg(color).add_modifier(Modifier::BOLD),
     )));
+
+    for tool in tools {
+        lines.push(Line::from(Span::styled(
+            format!("🔧 used {tool}"),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
 
     match role {
         // The user typed plain text; render it verbatim (just wrapped).
