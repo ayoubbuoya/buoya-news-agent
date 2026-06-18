@@ -11,11 +11,14 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use async_openai::{Client, config::OpenAIConfig};
 use sqlx::SqlitePool;
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 pub mod repository;
 
 use crate::config::AppConfig;
 use crate::embeddings::Embedder;
+use crate::llm::{self, StreamEvent};
+use crate::types::ChatMessage;
 use crate::{db, ingest};
 
 use repository::Repository;
@@ -74,6 +77,22 @@ impl Core {
     /// tools, HTTP, MCP) should go through this rather than touching the pool.
     pub fn repository(&self) -> Repository {
         Repository::new(self.db_pool.clone(), self.embedder.clone())
+    }
+
+    /// Drive one assistant turn over `history`, returning a receiver of streamed
+    /// events (tokens, tool-call notices, completion/error). The agent loop runs
+    /// in a spawned task using this core's model, tools, and repository; adapters
+    /// render the stream however they like (TUI widget, SSE, chat message edits).
+    pub fn chat_stream(&self, history: Vec<ChatMessage>) -> UnboundedReceiver<StreamEvent> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        tokio::spawn(llm::prompt_stream(
+            self.llm_client.clone(),
+            history,
+            self.config.ai_model.clone(),
+            self.repository(),
+            tx,
+        ));
+        rx
     }
 
     /// Spawn the long-lived background workers: a one-shot embedding backfill for

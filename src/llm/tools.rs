@@ -13,15 +13,12 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_openai::types::chat::{ChatCompletionTool, ChatCompletionTools, FunctionObject};
 use serde_json::{Value, json};
-use sqlx::SqlitePool;
 
 use crate::core::repository::Repository;
-use crate::embeddings::Embedder;
 
 /// Default number of articles returned by list/search tools when the model does
 /// not specify a limit.
@@ -207,15 +204,9 @@ pub fn tool_definitions() -> Vec<ChatCompletionTools> {
 /// produced. Always returns a string: on failure it returns a JSON object with an
 /// `error` field rather than propagating, so a bad tool call becomes feedback the
 /// model can recover from instead of aborting the turn.
-pub async fn execute(
-    pool: &SqlitePool,
-    embedder: &Arc<Embedder>,
-    name: &str,
-    arguments: &str,
-) -> String {
-    let repo = Repository::new(pool.clone(), embedder.clone());
+pub async fn execute(repo: &Repository, name: &str, arguments: &str) -> String {
     let result = match registry().into_iter().find(|tool| tool.name == name) {
-        Some(tool) => (tool.handler)(&repo, arguments).await,
+        Some(tool) => (tool.handler)(repo, arguments).await,
         None => Err(anyhow::anyhow!("unknown tool: {name}")),
     };
 
