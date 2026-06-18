@@ -57,4 +57,4 @@ retention_days = 90
 
 [http]
 timeout_ms = 15000
-user_agent = "buoya-news-mcp/1.0 (personal aggregator)"
+user_agent = "buoya-news-agent/1.0 (personal aggregator)"

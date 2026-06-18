@@ -1,4 +1,4 @@
-//! buoya-news-mcp entry point.
+//! buoya-news-agent entry point.
 //!
 
 // The lints table denies unwrap/expect crate-wide; tests are allowed to use them.

@@ -1,5 +1,5 @@
 [package]
-name = "buoya-news-mcp"
+name = "buoya-news-agent"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.96"
@@ -13,12 +13,12 @@ expect_used = "deny"
 
 [dependencies]
 anyhow = "1.0.102"
+async-openai = "0.41.0"
 chrono = { version = "0.4.45", features = ["serde"] }
 feed-rs = "2.3.1"
 hex = "0.4.3"
 humantime = "2.3.0"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "gzip"] }
-rmcp = { version = "1.7.0", features = ["server", "transport-io"] }
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 schemars = { version = "1.2.1", features = ["derive"] }
 serde = { version = "1.0.228", features = ["derive"] }

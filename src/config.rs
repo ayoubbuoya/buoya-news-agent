@@ -159,7 +159,7 @@ impl Default for Http {
     fn default() -> Self {
         Self {
             timeout_ms: 15_000,
-            user_agent: "buoya-news-mcp/1.0 (personal aggregator)".into(),
+            user_agent: "buoya-news-agent/1.0 (personal aggregator)".into(),
         }
     }
 }
