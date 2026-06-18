@@ -69,5 +69,13 @@ async fn run() -> Result<()> {
 
     tracing::info!("First Rss Feed Raw Items: {raw_items:?}");
 
+    let llm_model = "openai/gpt-oss-20b:free";
+
+    let prompt = "What happened in crypto today ?";
+
+    let response = llm::prompt(&app_state, prompt, llm_model).await?;
+
+    tracing::info!("LLM Response: {response}");
+
     Ok(())
 }
