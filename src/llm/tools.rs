@@ -10,9 +10,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use async_openai::types::chat::{ChatCompletionTool, ChatCompletionTools, FunctionObject};
 use serde_json::{Value, json};
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 
-use crate::embeddings::{self, Embedder};
+use crate::core::repository::Repository;
+use crate::embeddings::Embedder;
 
 /// Default number of articles returned by list/search tools when the model does
 /// not specify a limit.
@@ -149,12 +150,13 @@ pub async fn execute(
     name: &str,
     arguments: &str,
 ) -> String {
+    let repo = Repository::new(pool.clone(), embedder.clone());
     let result = match name {
-        "semantic_search" => semantic_search(pool, embedder, arguments).await,
-        "search_articles" => search_articles(pool, arguments).await,
-        "list_recent_articles" => list_recent_articles(pool, arguments).await,
-        "get_article" => get_article(pool, arguments).await,
-        "get_market_snapshot" => get_market_snapshot(pool).await,
+        "semantic_search" => semantic_search(&repo, arguments).await,
+        "search_articles" => search_articles(&repo, arguments).await,
+        "list_recent_articles" => list_recent_articles(&repo, arguments).await,
+        "get_article" => get_article(&repo, arguments).await,
+        "get_market_snapshot" => get_market_snapshot(&repo).await,
         other => Err(anyhow::anyhow!("unknown tool: {other}")),
     };
 
@@ -186,208 +188,55 @@ fn resolve_limit(args: &Value) -> i64 {
         .clamp(1, MAX_LIMIT)
 }
 
-async fn semantic_search(
-    pool: &SqlitePool,
-    embedder: &Arc<Embedder>,
-    arguments: &str,
-) -> Result<Value> {
+async fn semantic_search(repo: &Repository, arguments: &str) -> Result<Value> {
     let args = parse_args(arguments)?;
-    let query = args
-        .get("query")
-        .and_then(Value::as_str)
-        .filter(|q| !q.trim().is_empty())
-        .context("missing required `query` argument")?;
+    let query = require_query(&args)?;
     let limit = resolve_limit(&args);
 
-    // Embed the query off the async runtime (CPU-bound).
-    let embedder = embedder.clone();
-    let q = query.to_string();
-    let mut vectors = tokio::task::spawn_blocking(move || embedder.embed(vec![q]))
-        .await
-        .context("query embedding task panicked")??;
-    let query_vec = vectors
-        .pop()
-        .context("embedder returned no vector for the query")?;
-    let query_bytes = embeddings::vec_to_bytes(&query_vec);
-
-    // KNN in a CTE, then join back to articles. sqlite-vec wants the MATCH and `k`
-    // constraints on the bare virtual table, so the KNN is isolated from the join.
-    let rows = sqlx::query(
-        "WITH knn AS (
-             SELECT rowid, distance
-             FROM vec_articles
-             WHERE embedding MATCH ? AND k = ?
-             ORDER BY distance
-         )
-         SELECT a.id, a.title, a.url, a.source, a.category, a.summary, a.published_at, knn.distance
-         FROM knn
-         JOIN articles a ON a.id = knn.rowid
-         ORDER BY knn.distance",
-    )
-    .bind(query_bytes)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .context("semantic search query failed")?;
-
-    let articles: Vec<Value> = rows
-        .iter()
-        .map(|row| {
-            let mut value = article_summary(row);
-            if let Some(obj) = value.as_object_mut() {
-                obj.insert("distance".to_string(), json!(row.get::<f64, _>("distance")));
-            }
-            value
-        })
-        .collect();
+    let articles = repo.search_semantic(query, limit).await?;
     Ok(json!({ "count": articles.len(), "articles": articles }))
 }
 
-async fn search_articles(pool: &SqlitePool, arguments: &str) -> Result<Value> {
+async fn search_articles(repo: &Repository, arguments: &str) -> Result<Value> {
     let args = parse_args(arguments)?;
-    let query = args
-        .get("query")
-        .and_then(Value::as_str)
-        .filter(|q| !q.trim().is_empty())
-        .context("missing required `query` argument")?;
+    let query = require_query(&args)?;
     let limit = resolve_limit(&args);
 
-    let pattern = format!("%{}%", query);
-    let rows = sqlx::query(
-        "SELECT id, title, url, source, category, summary, published_at
-         FROM articles
-         WHERE title LIKE ? OR summary LIKE ? OR content LIKE ?
-         ORDER BY published_at DESC
-         LIMIT ?",
-    )
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(&pattern)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .context("failed to search articles")?;
-
-    let articles: Vec<Value> = rows.iter().map(article_summary).collect();
+    let articles = repo.search_keyword(query, limit).await?;
     Ok(json!({ "count": articles.len(), "articles": articles }))
 }
 
-async fn list_recent_articles(pool: &SqlitePool, arguments: &str) -> Result<Value> {
+async fn list_recent_articles(repo: &Repository, arguments: &str) -> Result<Value> {
     let args = parse_args(arguments)?;
     let limit = resolve_limit(&args);
     let category = args.get("category").and_then(Value::as_str);
 
-    let rows = match category {
-        Some(category) => {
-            sqlx::query(
-                "SELECT id, title, url, source, category, summary, published_at
-                 FROM articles
-                 WHERE category = ?
-                 ORDER BY published_at DESC
-                 LIMIT ?",
-            )
-            .bind(category)
-            .bind(limit)
-            .fetch_all(pool)
-            .await
-        }
-        None => {
-            sqlx::query(
-                "SELECT id, title, url, source, category, summary, published_at
-                 FROM articles
-                 ORDER BY published_at DESC
-                 LIMIT ?",
-            )
-            .bind(limit)
-            .fetch_all(pool)
-            .await
-        }
-    }
-    .context("failed to list recent articles")?;
-
-    let articles: Vec<Value> = rows.iter().map(article_summary).collect();
+    let articles = repo.list_recent(category, limit).await?;
     Ok(json!({ "count": articles.len(), "articles": articles }))
 }
 
-async fn get_article(pool: &SqlitePool, arguments: &str) -> Result<Value> {
+async fn get_article(repo: &Repository, arguments: &str) -> Result<Value> {
     let args = parse_args(arguments)?;
     let id = args
         .get("id")
         .and_then(Value::as_i64)
         .context("missing required integer `id` argument")?;
 
-    let row = sqlx::query(
-        "SELECT id, title, url, source, category, summary, content, published_at
-         FROM articles
-         WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await
-    .context("failed to fetch article")?;
-
-    match row {
-        Some(row) => Ok(json!({
-            "id": row.get::<i64, _>("id"),
-            "title": row.get::<String, _>("title"),
-            "url": row.get::<String, _>("url"),
-            "source": row.get::<String, _>("source"),
-            "category": row.get::<String, _>("category"),
-            "summary": row.get::<Option<String>, _>("summary"),
-            "content": row.get::<Option<String>, _>("content"),
-            "published_at": row.get::<String, _>("published_at"),
-        })),
+    match repo.get_article(id).await? {
+        Some(article) => Ok(serde_json::to_value(article)?),
         None => Ok(json!({ "error": format!("no article with id {id}") })),
     }
 }
 
-/// The synthesized snapshot sources, fetched by [`get_market_snapshot`]. Each is
-/// written once per day by its fetcher, so the newest row is today's reading.
-const SNAPSHOT_SOURCES: [&str; 3] = ["fear-greed", "coingecko", "defillama"];
-
-async fn get_market_snapshot(pool: &SqlitePool) -> Result<Value> {
-    let mut snapshots: Vec<Value> = Vec::with_capacity(SNAPSHOT_SOURCES.len());
-
-    for source in SNAPSHOT_SOURCES {
-        let row = sqlx::query(
-            "SELECT id, title, url, source, category, summary, content, published_at
-             FROM articles
-             WHERE source = ?
-             ORDER BY published_at DESC
-             LIMIT 1",
-        )
-        .bind(source)
-        .fetch_optional(pool)
-        .await
-        .with_context(|| format!("failed to fetch latest {source} snapshot"))?;
-
-        if let Some(row) = row {
-            snapshots.push(json!({
-                "id": row.get::<i64, _>("id"),
-                "title": row.get::<String, _>("title"),
-                "source": row.get::<String, _>("source"),
-                "category": row.get::<String, _>("category"),
-                "summary": row.get::<Option<String>, _>("summary"),
-                "content": row.get::<Option<String>, _>("content"),
-                "published_at": row.get::<String, _>("published_at"),
-            }));
-        }
-    }
-
+async fn get_market_snapshot(repo: &Repository) -> Result<Value> {
+    let snapshots = repo.market_snapshot().await?;
     Ok(json!({ "count": snapshots.len(), "snapshots": snapshots }))
 }
 
-/// Project a row into the compact shape used by list/search results: enough for
-/// the model to cite or decide whether to fetch the full article, without the
-/// heavy `content` column.
-fn article_summary(row: &sqlx::sqlite::SqliteRow) -> Value {
-    json!({
-        "id": row.get::<i64, _>("id"),
-        "title": row.get::<String, _>("title"),
-        "url": row.get::<String, _>("url"),
-        "source": row.get::<String, _>("source"),
-        "category": row.get::<String, _>("category"),
-        "summary": row.get::<Option<String>, _>("summary"),
-        "published_at": row.get::<String, _>("published_at"),
-    })
+/// Extract the required, non-empty `query` string argument.
+fn require_query(args: &Value) -> Result<&str> {
+    args.get("query")
+        .and_then(Value::as_str)
+        .filter(|q| !q.trim().is_empty())
+        .context("missing required `query` argument")
 }
