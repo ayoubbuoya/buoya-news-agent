@@ -23,8 +23,10 @@ read a local database covering crypto, DeFi, AI, security, and markets. It holds
 two kinds of records: (1) news articles from RSS feeds, and (2) daily market \
 snapshots — a crypto Fear & Greed sentiment index, a top-coins market overview \
 with 24h price moves, and total DeFi TVL by chain. \
-When the user asks about news, a topic, a company, or a token, use \
-search_articles or list_recent_articles, then get_article to read in depth. \
+When the user asks about a topic or theme, use semantic_search (meaning-based) to \
+find relevant articles; for an exact ticker or proper name use search_articles; \
+for what's new in an area use list_recent_articles. Then use get_article to read \
+a promising result in depth. \
 For questions about market sentiment or mood, current prices or movers, or DeFi \
 TVL, call get_market_snapshot instead of searching the articles. \
 Ground your reply in what the tools return and cite article titles and sources. \
@@ -97,6 +99,7 @@ pub async fn prompt_stream(
     history: Vec<ChatMessage>,
     model: String,
     pool: SqlitePool,
+    embedder: std::sync::Arc<crate::embeddings::Embedder>,
     tx: UnboundedSender<StreamEvent>,
 ) {
     // Prepend the system prompt; it is not persisted in `history`.
@@ -112,7 +115,7 @@ pub async fn prompt_stream(
             }
             Ok(TurnOutcome::Aborted) => return,
             Ok(TurnOutcome::ToolCalls(calls)) => {
-                if let Err(e) = run_tool_round(&pool, &mut messages, calls, &tx).await {
+                if let Err(e) = run_tool_round(&pool, &embedder, &mut messages, calls, &tx).await {
                     let _ = tx.send(StreamEvent::Error(e.to_string()));
                     return;
                 }
@@ -211,6 +214,7 @@ fn accumulate_tool_calls(
 /// the next turn sees what was requested and what came back.
 async fn run_tool_round(
     pool: &SqlitePool,
+    embedder: &std::sync::Arc<crate::embeddings::Embedder>,
     messages: &mut Vec<ChatCompletionRequestMessage>,
     calls: Vec<ToolCallAccum>,
     tx: &UnboundedSender<StreamEvent>,
@@ -239,7 +243,7 @@ async fn run_tool_round(
             &call.name,
             &call.arguments,
         )));
-        let result = tools::execute(pool, &call.name, &call.arguments).await;
+        let result = tools::execute(pool, embedder, &call.name, &call.arguments).await;
         let tool_msg = ChatCompletionRequestToolMessageArgs::default()
             .tool_call_id(call.id)
             .content(result)
@@ -256,7 +260,7 @@ async fn run_tool_round(
 fn describe_call(name: &str, arguments: &str) -> String {
     let args: serde_json::Value = serde_json::from_str(arguments).unwrap_or_default();
     let detail = match name {
-        "search_articles" => args
+        "semantic_search" | "search_articles" => args
             .get("query")
             .and_then(|v| v.as_str())
             .map(|q| format!("\"{q}\"")),

@@ -5,7 +5,10 @@ edition = "2024"
 rust-version = "1.96"
 
 [lints.rust]
-unsafe_code = "forbid"
+# Downgraded from "forbid" to "deny" so the single, justified sqlite-vec extension
+# registration in main.rs can opt out via #[allow(unsafe_code)]. Everything else
+# stays unsafe-free.
+unsafe_code = "deny"
 
 [lints.clippy]
 unwrap_used = "deny"
@@ -15,6 +18,10 @@ expect_used = "deny"
 anyhow = "1.0.102"
 async-openai = { version = "0.41.0", features = ["chat-completion"] }
 chrono = { version = "0.4.45", features = ["serde"] }
+fastembed = "5"
+# Pinned to match the version sqlx-sqlite 0.9 pulls, so sqlite3_auto_extension
+# registers against the same SQLite that sqlx opens connections with.
+libsqlite3-sys = "0.37"
 crossterm = { version = "0.29", features = ["event-stream"] }
 dotenvy = "0.15.7"
 feed-rs = "2.3.1"
@@ -29,6 +36,7 @@ reqwest = { version = "0.13.4", default-features = false, features = [
 schemars = { version = "1.2.1", features = ["derive"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+sqlite-vec = "0.1.9"
 sqlx = { version = "0.9.0", features = [
     "sqlite",
     "runtime-tokio",

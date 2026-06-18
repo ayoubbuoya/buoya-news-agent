@@ -9,3 +9,7 @@ config.toml
 CLAUDE.md
 
 .env
+
+.fastembed_cache
+
+docs

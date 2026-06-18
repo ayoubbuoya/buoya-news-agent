@@ -9,6 +9,7 @@
 
 mod config;
 mod db;
+mod embeddings;
 mod error;
 mod fetchers;
 mod ingest;
@@ -64,8 +65,31 @@ fn init_logging() -> Result<tracing_appender::non_blocking::WorkerGuard> {
     Ok(guard)
 }
 
+/// Register the sqlite-vec extension so every SQLite connection sqlx opens has the
+/// `vec0` virtual table and `vec_*` functions available. Must run before any
+/// connection/pool is created.
+fn register_sqlite_vec() {
+    // SAFETY: `sqlite3_auto_extension` registers the sqlite-vec entrypoint for all
+    // connections opened later by this process's SQLite. Called exactly once, before
+    // the pool is built. The transmute adapts sqlite-vec's init fn to the C ABI
+    // signature sqlite expects, which is the documented registration pattern.
+    #[allow(unsafe_code)]
+    unsafe {
+        libsqlite3_sys::sqlite3_auto_extension(Some(std::mem::transmute::<
+            *const (),
+            unsafe extern "C" fn(
+                *mut libsqlite3_sys::sqlite3,
+                *mut *mut std::os::raw::c_char,
+                *const libsqlite3_sys::sqlite3_api_routines,
+            ) -> std::os::raw::c_int,
+        >(sqlite_vec::sqlite3_vec_init as *const ())));
+    }
+}
+
 async fn run() -> Result<()> {
     let cfg = AppConfig::load(Path::new("config.default.toml"))?;
+
+    register_sqlite_vec();
 
     let http_client = reqwest::Client::builder()
         .timeout(Duration::from_millis(cfg.toml_config.http.timeout_ms))
@@ -81,12 +105,27 @@ async fn run() -> Result<()> {
     // Init db
     let db_pool = db::init_db().await?;
 
+    // Load the embedding model off the async runtime; on first run this downloads
+    // weights (~130 MB) and caches them on disk.
+    tracing::info!("loading embedding model (first run downloads weights)…");
+    let embedder = tokio::task::spawn_blocking(embeddings::Embedder::load)
+        .await
+        .context("embedder load task panicked")??;
+
     let app_state = state::AppState {
         http_client,
         llm_client,
         db_pool,
         config: Arc::new(cfg),
+        embedder: Arc::new(embedder),
     };
+
+    // Backfill embeddings for any articles indexed before semantic search existed.
+    // Runs in the background so the UI opens immediately; no-op once caught up.
+    let backfill_state = app_state.clone();
+    tokio::spawn(async move {
+        ingest::backfill_embeddings(&backfill_state).await;
+    });
 
     // Refresh the news in the background so the UI opens immediately, then keep
     // re-ingesting on the configured interval.
