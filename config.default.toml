@@ -21,11 +21,6 @@ name = "rekt"
 url = "https://rekt.news/rss/feed.xml"
 category = "security"
 
-[[sources.rss]]
-name = "anthropic"
-url = "https://www.anthropic.com/news/rss.xml"
-category = "ai"
-
 
 [sources.defillama]
 enabled = true
@@ -56,5 +51,5 @@ watchlist = ["hedera", "hbar", "stellar", "xlm", "ethereum", "solana"]
 retention_days = 90
 
 [http]
-timeout_ms = 15000
+timeout_ms = 15_000
 user_agent = "buoya-news-agent/1.0 (personal aggregator)"
