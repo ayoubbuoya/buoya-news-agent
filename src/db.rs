@@ -21,6 +21,15 @@ pub async fn init_db() -> Result<SqlitePool> {
 
     let pool = SqlitePool::connect_with(opts).await?;
 
+    // Confirm the sqlite-vec extension is loaded on connections from this pool.
+    // If registration (main::register_sqlite_vec) didn't take, this fails loudly
+    // here rather than later at the first vector query.
+    let vec_version: String = sqlx::query_scalar("SELECT vec_version()")
+        .fetch_one(&pool)
+        .await
+        .context("sqlite-vec extension not available (vec_version() failed)")?;
+    tracing::info!("sqlite-vec loaded: {vec_version}");
+
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS articles (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,6 +45,23 @@ pub async fn init_db() -> Result<SqlitePool> {
     )
     .execute(&pool)
     .await?;
+
+    // Vector index for semantic search, one row per article keyed by
+    // `rowid = articles.id`. vec0 virtual tables don't reliably support
+    // `IF NOT EXISTS`, so create-and-ignore the "already exists" error, mirroring
+    // the tool_calls migration below.
+    let create_vec = format!(
+        "CREATE VIRTUAL TABLE vec_articles USING vec0(embedding float[{}])",
+        crate::embeddings::EMBED_DIM
+    );
+    // AssertSqlSafe: `create_vec` is built only from the EMBED_DIM compile-time
+    // constant, never from user input.
+    if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(create_vec))
+        .execute(&pool)
+        .await
+    {
+        tracing::debug!("vec_articles creation skipped (likely exists): {e}");
+    }
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -233,4 +259,66 @@ pub async fn rename_session(pool: &SqlitePool, session_id: &str, title: &str) ->
         .await
         .context("failed to rename session")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Same registration as `main::register_sqlite_vec`, duplicated here so the
+    /// test is self-contained. `sqlite3_auto_extension` is process-global and
+    /// idempotent, so registering again is harmless.
+    fn register_vec() {
+        #[allow(unsafe_code)]
+        unsafe {
+            libsqlite3_sys::sqlite3_auto_extension(Some(std::mem::transmute(
+                sqlite_vec::sqlite3_vec_init as *const (),
+            )));
+        }
+    }
+
+    fn vec_to_bytes(v: &[f32]) -> Vec<u8> {
+        let mut b = Vec::with_capacity(v.len() * 4);
+        for f in v {
+            b.extend_from_slice(&f.to_le_bytes());
+        }
+        b
+    }
+
+    #[tokio::test]
+    async fn sqlite_vec_registers_and_knn_returns_nearest() {
+        register_vec();
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+
+        let version: String = sqlx::query_scalar("SELECT vec_version()")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(!version.is_empty(), "vec_version() should return a version");
+
+        sqlx::query("CREATE VIRTUAL TABLE vec_articles USING vec0(embedding float[3])")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Two rows; row 2 is nearest to the query [1,0,0].
+        for (rowid, v) in [(1_i64, [0.0_f32, 1.0, 0.0]), (2, [0.9, 0.1, 0.0])] {
+            sqlx::query("INSERT INTO vec_articles(rowid, embedding) VALUES (?, ?)")
+                .bind(rowid)
+                .bind(vec_to_bytes(&v))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let nearest: i64 = sqlx::query_scalar(
+            "SELECT rowid FROM vec_articles WHERE embedding MATCH ? AND k = 1 ORDER BY distance",
+        )
+        .bind(vec_to_bytes(&[1.0_f32, 0.0, 0.0]))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(nearest, 2, "row 2 should be the nearest neighbour");
+    }
 }
