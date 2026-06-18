@@ -12,9 +12,9 @@ use sqlx::{Row, SqlitePool};
 
 /// Default number of articles returned by list/search tools when the model does
 /// not specify a limit.
-const DEFAULT_LIMIT: i64 = 10;
+const DEFAULT_LIMIT: i64 = 20;
 /// Hard cap on rows returned so a single tool call cannot flood the context.
-const MAX_LIMIT: i64 = 25;
+const MAX_LIMIT: i64 = 50;
 
 /// The set of tools advertised to the model on every request.
 pub fn tool_definitions() -> Vec<ChatCompletionTools> {
