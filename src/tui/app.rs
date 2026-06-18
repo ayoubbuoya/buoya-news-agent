@@ -4,9 +4,9 @@ use anyhow::Result;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
+use crate::core::Core;
 use crate::db;
 use crate::llm::{self, StreamEvent};
-use crate::state::AppState;
 use crate::types::{ChatMessage, ChatSession, Role};
 
 /// Title given to a freshly created session until its first user message renames it.
@@ -33,7 +33,7 @@ pub enum Status {
 }
 
 pub struct App {
-    pub state: AppState,
+    pub state: Core,
     pub sessions: Vec<ChatSession>,
     /// Index into `sessions` highlighted in the sidebar.
     pub selected: usize,
@@ -60,7 +60,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(state: AppState) -> Self {
+    pub fn new(state: Core) -> Self {
         Self {
             state,
             sessions: Vec::new(),

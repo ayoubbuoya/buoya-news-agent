@@ -13,7 +13,7 @@ use futures::StreamExt;
 use sqlx::SqlitePool;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::state::AppState;
+use crate::core::Core;
 use crate::types::{ChatMessage, Role};
 
 /// System prompt prepended to every conversation. It steers the model toward the
@@ -282,7 +282,7 @@ fn describe_call(name: &str, arguments: &str) -> String {
     }
 }
 
-pub async fn prompt(app_state: &AppState, prompt: &str, model: &str) -> Result<String> {
+pub async fn prompt(app_state: &Core, prompt: &str, model: &str) -> Result<String> {
     let client = &app_state.llm_client;
 
     let request = CreateChatCompletionRequestArgs::default()
