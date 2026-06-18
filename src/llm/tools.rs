@@ -5,10 +5,14 @@
 //! parameter spec the model fills in, and [`execute`] runs the matching query
 //! and returns a JSON string the model reads back as the tool result.
 
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use async_openai::types::chat::{ChatCompletionTool, ChatCompletionTools, FunctionObject};
 use serde_json::{Value, json};
 use sqlx::{Row, SqlitePool};
+
+use crate::embeddings::{self, Embedder};
 
 /// Default number of articles returned by list/search tools when the model does
 /// not specify a limit.
@@ -20,11 +24,36 @@ const MAX_LIMIT: i64 = 50;
 pub fn tool_definitions() -> Vec<ChatCompletionTools> {
     vec![
         function_tool(
+            "semantic_search",
+            "Semantic (meaning-based) search over stored news articles using vector \
+             similarity. Finds relevant articles even when they don't share the \
+             exact words as the query. Prefer this for conceptual or topical \
+             questions, e.g. \"regulatory risk for stablecoins\" or \"layer-2 \
+             scaling progress\". For an exact ticker or proper name, prefer \
+             search_articles instead. Lower distance means more relevant.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural-language description of what you're looking for."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of articles to return (1-50).",
+                        "minimum": 1,
+                        "maximum": MAX_LIMIT
+                    }
+                },
+                "required": ["query"]
+            }),
+        ),
+        function_tool(
             "search_articles",
-            "Full-text search over stored news articles. Matches the query \
-             against article titles, summaries, and body content. Use this to \
-             answer questions about a topic, company, or token mentioned in the \
-             news.",
+            "Exact keyword/substring search over stored news articles. Matches the \
+             query literally against article titles, summaries, and body content. \
+             Best for exact tickers or proper names (e.g. \"HBAR\", \"Coinbase\"). \
+             For conceptual or topical questions, prefer semantic_search.",
             json!({
                 "type": "object",
                 "properties": {
@@ -114,8 +143,14 @@ fn function_tool(name: &str, description: &str, parameters: Value) -> ChatComple
 /// produced. Always returns a string for the model: on failure it returns a
 /// JSON object with an `error` field rather than propagating, so a bad tool call
 /// becomes feedback the model can recover from instead of aborting the turn.
-pub async fn execute(pool: &SqlitePool, name: &str, arguments: &str) -> String {
+pub async fn execute(
+    pool: &SqlitePool,
+    embedder: &Arc<Embedder>,
+    name: &str,
+    arguments: &str,
+) -> String {
     let result = match name {
+        "semantic_search" => semantic_search(pool, embedder, arguments).await,
         "search_articles" => search_articles(pool, arguments).await,
         "list_recent_articles" => list_recent_articles(pool, arguments).await,
         "get_article" => get_article(pool, arguments).await,
@@ -149,6 +184,63 @@ fn resolve_limit(args: &Value) -> i64 {
         .and_then(Value::as_i64)
         .unwrap_or(DEFAULT_LIMIT)
         .clamp(1, MAX_LIMIT)
+}
+
+async fn semantic_search(
+    pool: &SqlitePool,
+    embedder: &Arc<Embedder>,
+    arguments: &str,
+) -> Result<Value> {
+    let args = parse_args(arguments)?;
+    let query = args
+        .get("query")
+        .and_then(Value::as_str)
+        .filter(|q| !q.trim().is_empty())
+        .context("missing required `query` argument")?;
+    let limit = resolve_limit(&args);
+
+    // Embed the query off the async runtime (CPU-bound).
+    let embedder = embedder.clone();
+    let q = query.to_string();
+    let mut vectors = tokio::task::spawn_blocking(move || embedder.embed(vec![q]))
+        .await
+        .context("query embedding task panicked")??;
+    let query_vec = vectors
+        .pop()
+        .context("embedder returned no vector for the query")?;
+    let query_bytes = embeddings::vec_to_bytes(&query_vec);
+
+    // KNN in a CTE, then join back to articles. sqlite-vec wants the MATCH and `k`
+    // constraints on the bare virtual table, so the KNN is isolated from the join.
+    let rows = sqlx::query(
+        "WITH knn AS (
+             SELECT rowid, distance
+             FROM vec_articles
+             WHERE embedding MATCH ? AND k = ?
+             ORDER BY distance
+         )
+         SELECT a.id, a.title, a.url, a.source, a.category, a.summary, a.published_at, knn.distance
+         FROM knn
+         JOIN articles a ON a.id = knn.rowid
+         ORDER BY knn.distance",
+    )
+    .bind(query_bytes)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .context("semantic search query failed")?;
+
+    let articles: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            let mut value = article_summary(row);
+            if let Some(obj) = value.as_object_mut() {
+                obj.insert("distance".to_string(), json!(row.get::<f64, _>("distance")));
+            }
+            value
+        })
+        .collect();
+    Ok(json!({ "count": articles.len(), "articles": articles }))
 }
 
 async fn search_articles(pool: &SqlitePool, arguments: &str) -> Result<Value> {
