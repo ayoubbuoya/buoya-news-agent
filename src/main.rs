@@ -14,6 +14,7 @@ mod fetchers;
 mod ingest;
 mod llm;
 mod state;
+mod tui;
 mod types;
 
 use std::path::Path;
@@ -21,27 +22,50 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_openai::{Client, config::OpenAIConfig};
 use config::AppConfig;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .init();
+    // The TUI owns the terminal, so logs must go to a file instead of stdout/stderr,
+    // otherwise tracing output would corrupt the rendered screen.
+    let _log_guard = match init_logging() {
+        Ok(guard) => guard,
+        Err(e) => {
+            eprintln!("failed to initialize logging: {e:#}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             tracing::error!("{e:#}");
+            eprintln!("{e:#}");
             ExitCode::FAILURE
         }
     }
 }
 
+/// Route logs to `data/agent.log`. Returns a guard that must stay alive for the
+/// duration of the program so buffered logs are flushed.
+fn init_logging() -> Result<tracing_appender::non_blocking::WorkerGuard> {
+    std::fs::create_dir_all("data").context("failed to create data directory")?;
+    let file_appender = tracing_appender::rolling::never("data", "agent.log");
+    let (writer, guard) = tracing_appender::non_blocking(file_appender);
+
+    tracing_subscriber::fmt()
+        .with_writer(writer)
+        .with_ansi(false)
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
+
+    Ok(guard)
+}
+
 async fn run() -> Result<()> {
-    let cfg = AppConfig::load(Path::new("config.default.toml"));
+    let cfg = AppConfig::load(Path::new("config.default.toml"))?;
 
     let http_client = reqwest::Client::builder()
         .timeout(Duration::from_millis(cfg.toml_config.http.timeout_ms))
@@ -64,20 +88,13 @@ async fn run() -> Result<()> {
         config: Arc::new(cfg),
     };
 
-    println!("App state: {app_state:?}");
+    // Refresh the news in the background so the UI opens immediately.
+    let ingest_state = app_state.clone();
+    tokio::spawn(async move {
+        let new_stored = ingest::run(&ingest_state).await;
+        tracing::info!("Ingested {} new items", new_stored);
+    });
 
-    // Do the first ingest
-    let new_stored = ingest::run(&app_state).await;
-    
-    tracing::info!("Ingested {} new items", new_stored);
-
-    let llm_model = "openai/gpt-oss-20b:free";
-
-    let prompt = "What happened in crypto today ?";
-
-    // let response = llm::prompt(&app_state, prompt, llm_model).await?;
-
-    // tracing::info!("LLM Response: {response}");
-
-    Ok(())
+    // Hand control to the chat TUI.
+    tui::run(app_state).await
 }
