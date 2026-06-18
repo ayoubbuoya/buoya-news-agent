@@ -37,13 +37,17 @@ pub async fn fetch_rss_source(
                 .or(entry.updated)
                 .unwrap_or_else(Utc::now)
                 .with_timezone(&Utc);
+            // `<content:encoded>` (RSS) / `<content>` (Atom). Not all feeds
+            // provide it, so this stays optional and may be None.
+            let content = entry.content.and_then(|c| c.body);
+           
             Some(RawItem {
                 title,
                 url,
                 source: source.name.clone(),
                 category: source.category,
                 summary: entry.summary.map(|s| s.content),
-                content: None,
+                content,
                 published_at,
             })
         })
