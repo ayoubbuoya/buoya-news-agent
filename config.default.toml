@@ -84,9 +84,11 @@ enabled = true
 enabled = true
 top_n = 100
 
-[sources.cryptopanic]
-enabled = false
-api_key = ""
+
+# Crypto Fear & Greed Index (alternative.me). Free, no API key. Synthesizes one
+# market-sentiment snapshot per day.
+[sources.fear_greed]
+enabled = true
 
 [sources.reddit]
 enabled = true

@@ -26,6 +26,7 @@ pub struct Sources {
     pub defillama: DefillamaSource,
     pub coingecko: CoingeckoSource,
     pub cryptopanic: CryptopanicSource,
+    pub fear_greed: FearGreedSource,
     pub reddit: RedditSource,
     pub arxiv: ArxivSource,
     pub huggingface: HuggingfaceSource,
@@ -72,6 +73,18 @@ impl Default for CoingeckoSource {
 pub struct CryptopanicSource {
     pub enabled: bool,
     pub api_key: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FearGreedSource {
+    pub enabled: bool,
+}
+
+impl Default for FearGreedSource {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -228,6 +241,7 @@ impl TomlConfig {
             || self.sources.defillama.enabled
             || self.sources.coingecko.enabled
             || self.sources.cryptopanic.enabled
+            || self.sources.fear_greed.enabled
             || self.sources.reddit.enabled
             || self.sources.arxiv.enabled
             || self.sources.huggingface.enabled
