@@ -1,3 +1,4 @@
+pub mod curator;
 mod tools;
 
 use anyhow::Result;

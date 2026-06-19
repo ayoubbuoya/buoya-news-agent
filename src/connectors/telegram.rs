@@ -16,6 +16,7 @@ use tokio::sync::broadcast::error::RecvError;
 
 use crate::core::Core;
 use crate::core::config::AppConfig;
+use crate::core::llm::curator::{self, Pick};
 use crate::core::repository::ArticleSummary;
 use crate::core::types::Category;
 
@@ -23,9 +24,9 @@ use crate::core::types::Category;
 /// tests can point the client at a local mock server instead of the real API.
 const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
 
-/// Max characters of an article summary included in an alert, so a long lead doesn't
-/// produce a wall-of-text message. Trimmed on a char boundary.
-const SUMMARY_MAX_CHARS: usize = 300;
+/// Upper bound on articles the editor may flag per ingest tick, so a busy tick
+/// can't turn one digest into a wall of links.
+const MAX_PICKS: usize = 5;
 
 /// Fully-resolved, ready-to-run connector settings: the secret token (from the
 /// environment) combined with the non-secret routing/filtering (from TOML). Built
@@ -86,8 +87,9 @@ impl TelegramConfig {
 }
 
 /// Run the push loop until the ingest channel closes. Spawned as a background task
-/// by the `serve` daemon. Each received batch is filtered and each surviving article
-/// is sent as its own Telegram message.
+/// by the `serve` daemon. For each ingest batch it sends a single digest message:
+/// how many articles just landed, plus the few the editor agent judged worth
+/// reading (see [`handle_batch`]).
 ///
 /// Failures are logged and swallowed, never propagated: one failed send (or a slow
 /// network) must not kill the connector or affect ingestion.
@@ -101,16 +103,7 @@ pub async fn run(core: Core, config: TelegramConfig) {
 
     loop {
         match rx.recv().await {
-            Ok(batch) => {
-                for article in batch.iter().filter(|a| config.passes(a)) {
-                    let text = format_article(article);
-                    // Reuse the core's shared HTTP client (already configured with a
-                    // timeout and user-agent) rather than building a new one.
-                    if let Err(e) = send_message(&core.http_client, &config, &text).await {
-                        tracing::error!("telegram sendMessage failed for {}: {e:#}", article.url);
-                    }
-                }
-            }
+            Ok(batch) => handle_batch(&core, &config, &batch).await,
             // The connector fell behind the channel's buffer and missed `n` batches.
             // This is the deliberately-lossy contract of the ingest broadcast: log it
             // and carry on rather than treat it as fatal.
@@ -123,6 +116,42 @@ pub async fn run(core: Core, config: TelegramConfig) {
                 break;
             }
         }
+    }
+}
+
+/// Handle one ingest batch: run the editor agent over the category-filtered
+/// candidates, then push a single digest (count + picks) to Telegram.
+///
+/// The count reflects everything newly stored this tick; the category allowlist is a
+/// coarse pre-filter feeding the editor, which then picks the few worth reading. A
+/// curation failure is non-fatal — we still send the count so the digest goes out.
+async fn handle_batch(core: &Core, config: &TelegramConfig, batch: &[ArticleSummary]) {
+    let total = batch.len();
+
+    let candidates: Vec<ArticleSummary> =
+        batch.iter().filter(|a| config.passes(a)).cloned().collect();
+
+    let picks = match curator::select_worthwhile(
+        &core.llm_client,
+        &core.config.ai_model,
+        &core.config.toml_config.general.watchlist,
+        &candidates,
+        MAX_PICKS,
+    )
+    .await
+    {
+        Ok(picks) => picks,
+        Err(e) => {
+            tracing::error!("telegram editor agent failed; sending count only: {e:#}");
+            Vec::new()
+        }
+    };
+
+    let text = format_digest(total, &picks);
+    // Reuse the core's shared HTTP client (already configured with a timeout and
+    // user-agent) rather than building a new one.
+    if let Err(e) = send_message(&core.http_client, config, &text).await {
+        tracing::error!("telegram digest send failed: {e:#}");
     }
 }
 
@@ -167,25 +196,35 @@ async fn send_message(
     Ok(())
 }
 
-/// Render an article as a Telegram HTML message: bold title, a `category · source`
-/// line, an optional trimmed summary, and the URL on its own line (Telegram unfurls
-/// it into a link preview).
-fn format_article(article: &ArticleSummary) -> String {
-    let mut msg = format!("<b>{}</b>\n", escape_html(&article.title));
-    msg.push_str(&format!(
-        "{} · {}\n",
-        escape_html(&article.category),
-        escape_html(&article.source),
-    ));
+/// Render the per-tick digest as a single Telegram HTML message: a header with the
+/// count of newly-ingested articles, then the editor's picks — each a numbered, bold
+/// title, a `category · source — reason` line, and the URL on its own line (Telegram
+/// unfurls it into a link preview). With no picks, the header carries a short note.
+fn format_digest(total: usize, picks: &[Pick]) -> String {
+    let plural = if total == 1 { "" } else { "s" };
+    let mut msg = format!("📥 <b>{total}</b> new article{plural} ingested\n");
 
-    if let Some(summary) = &article.summary {
-        let trimmed = truncate_chars(summary, SUMMARY_MAX_CHARS);
-        if !trimmed.is_empty() {
-            msg.push_str(&format!("\n{}\n", escape_html(&trimmed)));
-        }
+    if picks.is_empty() {
+        msg.push_str("\nNothing notable to highlight this round.");
+        return msg;
     }
 
-    msg.push_str(&format!("\n{}", escape_html(&article.url)));
+    msg.push_str(&format!("\n🔎 {} worth reading:\n", picks.len()));
+    for (i, pick) in picks.iter().enumerate() {
+        let a = &pick.article;
+        msg.push_str(&format!(
+            "\n{}. <b>{}</b>\n{} · {}",
+            i + 1,
+            escape_html(&a.title),
+            escape_html(&a.category),
+            escape_html(&a.source),
+        ));
+        let reason = pick.reason.trim();
+        if !reason.is_empty() {
+            msg.push_str(&format!(" — {}", escape_html(reason)));
+        }
+        msg.push_str(&format!("\n{}\n", escape_html(&a.url)));
+    }
     msg
 }
 
@@ -195,17 +234,6 @@ fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
-}
-
-/// Truncate to at most `max` characters on a char boundary (so we never split a
-/// multi-byte UTF-8 character), appending an ellipsis when anything was cut.
-fn truncate_chars(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max).collect();
-    out.push('…');
-    out
 }
 
 /// The lowercase string a [`Category`] is stored as in the DB (e.g. `Defi` →
@@ -272,20 +300,30 @@ mod tests {
         assert_eq!(category_db_str(Category::Ai), "ai");
     }
 
+    fn pick(category: &str, reason: &str) -> Pick {
+        Pick {
+            article: summary(category),
+            reason: reason.to_string(),
+        }
+    }
+
     #[test]
-    fn format_escapes_html_and_includes_key_fields() {
-        let msg = format_article(&summary("defi"));
+    fn digest_escapes_html_and_includes_key_fields() {
+        let msg = format_digest(7, &[pick("defi", "big exploit")]);
+        assert!(msg.contains("<b>7</b> new articles"), "count present: {msg}");
         assert!(msg.contains("&lt;with&gt;"), "angle brackets escaped: {msg}");
         assert!(msg.contains("&amp;"), "ampersand escaped: {msg}");
         assert!(msg.contains("https://example.com/a?x=1&amp;y=2"), "url present: {msg}");
         assert!(msg.contains("src"), "source present: {msg}");
+        assert!(msg.contains("— big exploit"), "reason present: {msg}");
         // The raw, unescaped form must not survive.
         assert!(!msg.contains("<with>"));
     }
 
     #[test]
-    fn truncate_adds_ellipsis_only_when_cut() {
-        assert_eq!(truncate_chars("short", 10), "short");
-        assert_eq!(truncate_chars("abcdef", 3), "abc…");
+    fn digest_singular_count_and_no_picks_note() {
+        let msg = format_digest(1, &[]);
+        assert!(msg.contains("<b>1</b> new article ingested"), "singular: {msg}");
+        assert!(msg.contains("Nothing notable"), "empty note: {msg}");
     }
 }
