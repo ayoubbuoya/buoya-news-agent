@@ -7,25 +7,17 @@
 // fetchers, scoring — BNM-3/6/7/10). Lift this once those tasks wire them in.
 #![allow(dead_code)]
 
-mod config;
 mod core;
-mod db;
-mod embeddings;
-mod error;
-mod fetchers;
-mod ingest;
-mod llm;
 mod server;
 mod tui;
-mod types;
 
 use std::path::Path;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use config::AppConfig;
 use core::Core;
+use core::config::AppConfig;
 use server::ServeArgs;
 
 /// buoya-news-agent: a local news agent over crypto, DeFi, AI, security, and markets.

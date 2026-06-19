@@ -13,13 +13,20 @@ use async_openai::{Client, config::OpenAIConfig};
 use sqlx::SqlitePool;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
+pub mod config;
+pub mod db;
+pub mod embeddings;
+pub mod error;
+pub mod fetchers;
+pub mod ingest;
+pub mod llm;
 pub mod repository;
+pub mod types;
 
-use crate::config::AppConfig;
-use crate::embeddings::Embedder;
-use crate::llm::{self, StreamEvent};
-use crate::types::ChatMessage;
-use crate::{db, ingest};
+use config::AppConfig;
+use embeddings::Embedder;
+use llm::StreamEvent;
+use types::ChatMessage;
 
 use repository::Repository;
 

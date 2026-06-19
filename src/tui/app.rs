@@ -5,9 +5,9 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModif
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::core::Core;
-use crate::db;
-use crate::llm::StreamEvent;
-use crate::types::{ChatMessage, ChatSession, Role};
+use crate::core::db;
+use crate::core::llm::StreamEvent;
+use crate::core::types::{ChatMessage, ChatSession, Role};
 
 /// Title given to a freshly created session until its first user message renames it.
 const DEFAULT_SESSION_TITLE: &str = "New chat";

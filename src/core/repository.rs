@@ -12,7 +12,7 @@ use serde::Serialize;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqlitePool};
 
-use crate::embeddings::{self, Embedder};
+use crate::core::embeddings::{self, Embedder};
 
 /// The market-snapshot sources, one row written per day by each fetcher, so the
 /// newest row is today's reading.

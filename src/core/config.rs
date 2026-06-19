@@ -5,8 +5,8 @@ use std::path::Path;
 use dotenvy::dotenv;
 use serde::Deserialize;
 
-use crate::error::ConfigError;
-use crate::types::Category;
+use crate::core::error::ConfigError;
+use crate::core::types::Category;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]

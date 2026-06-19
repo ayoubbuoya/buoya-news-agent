@@ -5,7 +5,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
-use crate::types::{ChatMessage, ChatSession, Role};
+use crate::core::types::{ChatMessage, ChatSession, Role};
 
 pub async fn init_db() -> Result<SqlitePool> {
     let database_url =
@@ -52,7 +52,7 @@ pub async fn init_db() -> Result<SqlitePool> {
     // the tool_calls migration below.
     let create_vec = format!(
         "CREATE VIRTUAL TABLE vec_articles USING vec0(embedding float[{}])",
-        crate::embeddings::EMBED_DIM
+        crate::core::embeddings::EMBED_DIM
     );
     // AssertSqlSafe: `create_vec` is built only from the EMBED_DIM compile-time
     // constant, never from user input.

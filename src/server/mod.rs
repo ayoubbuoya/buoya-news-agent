@@ -18,8 +18,8 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::core::Core;
-use crate::llm::StreamEvent;
-use crate::types::{ChatMessage, Role};
+use crate::core::llm::StreamEvent;
+use crate::core::types::{ChatMessage, Role};
 
 /// Default number of articles a list/search route returns when unspecified.
 const DEFAULT_LIMIT: i64 = 20;

@@ -14,7 +14,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::core::Core;
 use crate::core::repository::Repository;
-use crate::types::{ChatMessage, Role};
+use crate::core::types::{ChatMessage, Role};
 
 /// System prompt prepended to every conversation. It steers the model toward the
 /// article-reading tools when a question concerns stored news.

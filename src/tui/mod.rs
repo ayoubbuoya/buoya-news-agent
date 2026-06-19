@@ -12,7 +12,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tokio::time;
 
 use crate::core::Core;
-use crate::llm::StreamEvent;
+use crate::core::llm::StreamEvent;
 use app::App;
 
 /// Set up the terminal, run the chat event loop, and restore the terminal on exit.

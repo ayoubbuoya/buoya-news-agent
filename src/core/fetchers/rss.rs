@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::Utc;
 use feed_rs::model::Feed;
 
-use crate::{config::RssSource, error::FetchError, types::RawItem};
+use crate::core::{config::RssSource, error::FetchError, types::RawItem};
 
 /// Fetch and parse a single RSS/Atom feed into raw items.
 pub async fn fetch_rss_source(

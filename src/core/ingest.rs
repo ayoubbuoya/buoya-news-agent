@@ -1,7 +1,7 @@
 use anyhow::Context;
 use sqlx::Row;
 
-use crate::{core::Core, embeddings, fetchers, types::RawItem};
+use crate::core::{Core, embeddings, fetchers, types::RawItem};
 
 /// Max characters of an article fed to the embedder. BGE-small truncates around
 /// ~512 tokens; this keeps us comfortably under that while capturing title +
