@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
-use crate::{
+use crate::core::{
     error::FetchError,
     types::{Category, RawItem},
 };

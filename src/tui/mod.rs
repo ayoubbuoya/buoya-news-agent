@@ -11,19 +11,19 @@ use ratatui::crossterm::event;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 use tokio::time;
 
-use crate::llm::StreamEvent;
-use crate::state::AppState;
+use crate::core::Core;
+use crate::core::llm::StreamEvent;
 use app::App;
 
 /// Set up the terminal, run the chat event loop, and restore the terminal on exit.
-pub async fn run(state: AppState) -> Result<()> {
+pub async fn run(state: Core) -> Result<()> {
     let mut terminal = ratatui::try_init()?;
     let result = run_loop(&mut terminal, state).await;
     ratatui::try_restore()?;
     result
 }
 
-async fn run_loop(terminal: &mut ratatui::DefaultTerminal, state: AppState) -> Result<()> {
+async fn run_loop(terminal: &mut ratatui::DefaultTerminal, state: Core) -> Result<()> {
     let mut app = App::new(state);
     app.load_sessions().await?;
 

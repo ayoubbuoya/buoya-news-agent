@@ -10,11 +10,11 @@ use async_openai::types::chat::{
     CreateChatCompletionRequestArgs, FunctionCall,
 };
 use futures::StreamExt;
-use sqlx::SqlitePool;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::state::AppState;
-use crate::types::{ChatMessage, Role};
+use crate::core::Core;
+use crate::core::repository::Repository;
+use crate::core::types::{ChatMessage, Role};
 
 /// System prompt prepended to every conversation. It steers the model toward the
 /// article-reading tools when a question concerns stored news.
@@ -98,8 +98,7 @@ pub async fn prompt_stream(
     client: async_openai::Client<OpenAIConfig>,
     history: Vec<ChatMessage>,
     model: String,
-    pool: SqlitePool,
-    embedder: std::sync::Arc<crate::embeddings::Embedder>,
+    repo: Repository,
     tx: UnboundedSender<StreamEvent>,
 ) {
     // Prepend the system prompt; it is not persisted in `history`.
@@ -115,7 +114,7 @@ pub async fn prompt_stream(
             }
             Ok(TurnOutcome::Aborted) => return,
             Ok(TurnOutcome::ToolCalls(calls)) => {
-                if let Err(e) = run_tool_round(&pool, &embedder, &mut messages, calls, &tx).await {
+                if let Err(e) = run_tool_round(&repo, &mut messages, calls, &tx).await {
                     let _ = tx.send(StreamEvent::Error(e.to_string()));
                     return;
                 }
@@ -213,8 +212,7 @@ fn accumulate_tool_calls(
 /// Append the assistant's tool-call message followed by each tool's result, so
 /// the next turn sees what was requested and what came back.
 async fn run_tool_round(
-    pool: &SqlitePool,
-    embedder: &std::sync::Arc<crate::embeddings::Embedder>,
+    repo: &Repository,
     messages: &mut Vec<ChatCompletionRequestMessage>,
     calls: Vec<ToolCallAccum>,
     tx: &UnboundedSender<StreamEvent>,
@@ -243,7 +241,7 @@ async fn run_tool_round(
             &call.name,
             &call.arguments,
         )));
-        let result = tools::execute(pool, embedder, &call.name, &call.arguments).await;
+        let result = tools::execute(repo, &call.name, &call.arguments).await;
         let tool_msg = ChatCompletionRequestToolMessageArgs::default()
             .tool_call_id(call.id)
             .content(result)
@@ -282,7 +280,7 @@ fn describe_call(name: &str, arguments: &str) -> String {
     }
 }
 
-pub async fn prompt(app_state: &AppState, prompt: &str, model: &str) -> Result<String> {
+pub async fn prompt(app_state: &Core, prompt: &str, model: &str) -> Result<String> {
     let client = &app_state.llm_client;
 
     let request = CreateChatCompletionRequestArgs::default()

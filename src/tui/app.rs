@@ -2,12 +2,12 @@
 
 use anyhow::Result;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use tokio::sync::mpsc::{self, UnboundedReceiver};
+use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::db;
-use crate::llm::{self, StreamEvent};
-use crate::state::AppState;
-use crate::types::{ChatMessage, ChatSession, Role};
+use crate::core::Core;
+use crate::core::db;
+use crate::core::llm::StreamEvent;
+use crate::core::types::{ChatMessage, ChatSession, Role};
 
 /// Title given to a freshly created session until its first user message renames it.
 const DEFAULT_SESSION_TITLE: &str = "New chat";
@@ -33,7 +33,7 @@ pub enum Status {
 }
 
 pub struct App {
-    pub state: AppState,
+    pub state: Core,
     pub sessions: Vec<ChatSession>,
     /// Index into `sessions` highlighted in the sidebar.
     pub selected: usize,
@@ -60,7 +60,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(state: AppState) -> Self {
+    pub fn new(state: Core) -> Self {
         Self {
             state,
             sessions: Vec::new(),
@@ -273,18 +273,9 @@ impl App {
             }
         }
 
-        // Spawn the streaming completion; tokens come back over the channel.
-        let (tx, rx) = mpsc::unbounded_channel();
-        let client = self.state.llm_client.clone();
-        let model = self.state.config.ai_model.clone();
-        let history = self.messages.clone();
-        let pool = self.state.db_pool.clone();
-        let embedder = self.state.embedder.clone();
-        tokio::spawn(llm::prompt_stream(
-            client, history, model, pool, embedder, tx,
-        ));
-
-        self.pending_stream_rx = Some(rx);
+        // Drive the streaming completion through the core; tokens come back over
+        // the channel.
+        self.pending_stream_rx = Some(self.state.chat_stream(self.messages.clone()));
         self.status = Status::Streaming {
             partial: String::new(),
             spinner_idx: 0,

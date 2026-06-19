@@ -55,6 +55,11 @@ tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 url = "2.5.8"
 uuid = { version = "1.23.3", features = ["v4"] }
+clap = { version = "4.6.1", features = ["derive"] }
+actix-web = "4.13.0"
+actix-web-lab = "0.26.0"
+tokio-stream = "0.1.18"
+rmcp = { version = "1.7.0", features = ["server", "transport-streamable-http-server", "transport-streamable-http-server-session"] }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

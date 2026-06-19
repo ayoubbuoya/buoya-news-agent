@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
 use crate::tui::app::{App, Focus, Status};
 use crate::tui::markdown;
-use crate::types::Role;
+use crate::core::types::Role;
 
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 

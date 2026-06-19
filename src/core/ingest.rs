@@ -1,7 +1,7 @@
 use anyhow::Context;
 use sqlx::Row;
 
-use crate::{embeddings, fetchers, state::AppState, types::RawItem};
+use crate::core::{Core, embeddings, fetchers, types::RawItem};
 
 /// Max characters of an article fed to the embedder. BGE-small truncates around
 /// ~512 tokens; this keeps us comfortably under that while capturing title +
@@ -10,7 +10,7 @@ const EMBED_TEXT_MAX_CHARS: usize = 1500;
 
 /// Fetch all enabled sources and persist them into the db. Returns the number of
 /// newly-stored items.
-pub async fn run(app_state: &AppState) -> usize {
+pub async fn run(app_state: &Core) -> usize {
     let cfg = &app_state.config.toml_config;
     let mut new_stored: usize = 0;
 
@@ -62,7 +62,7 @@ pub async fn run(app_state: &AppState) -> usize {
 /// Persist a batch of raw items, ignoring duplicates (by URL). Newly-inserted
 /// rows are then embedded and indexed for semantic search. Returns the count of
 /// rows actually inserted.
-async fn store_items(app_state: &AppState, items: &[RawItem]) -> usize {
+async fn store_items(app_state: &Core, items: &[RawItem]) -> usize {
     let mut stored = 0;
     // (article id, text-to-embed) for rows actually inserted, embedded together
     // as one batch after the loop.
@@ -109,7 +109,7 @@ async fn store_items(app_state: &AppState, items: &[RawItem]) -> usize {
 
 /// Embed a batch of `(article_id, text)` pairs and insert the vectors into
 /// `vec_articles`. Inference runs on a blocking thread off the async runtime.
-async fn store_embeddings(app_state: &AppState, items: Vec<(i64, String)>) -> anyhow::Result<()> {
+async fn store_embeddings(app_state: &Core, items: Vec<(i64, String)>) -> anyhow::Result<()> {
     let embedder = app_state.embedder.clone();
     let texts: Vec<String> = items.iter().map(|(_, t)| t.clone()).collect();
 
@@ -155,7 +155,7 @@ const BACKFILL_BATCH: usize = 64;
 /// search existed, or where ingest-time embedding failed. Idempotent and safe to
 /// run on every startup: it's a no-op once everything is indexed. Each batch it
 /// embeds shrinks the unindexed set, so the loop terminates.
-pub async fn backfill_embeddings(app_state: &AppState) {
+pub async fn backfill_embeddings(app_state: &Core) {
     let mut total = 0usize;
 
     loop {

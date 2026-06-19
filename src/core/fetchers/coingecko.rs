@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::{
+use crate::core::{
     error::FetchError,
     types::{Category, RawItem},
 };
