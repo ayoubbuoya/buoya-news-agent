@@ -17,6 +17,7 @@ use serde::Deserialize;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+use crate::connectors::telegram;
 use crate::core::Core;
 use crate::core::llm::StreamEvent;
 use crate::core::types::{ChatMessage, Role};
@@ -39,6 +40,14 @@ pub struct ServeArgs {
 
 /// Run the HTTP backend until shut down.
 pub async fn run(core: Core, args: ServeArgs) -> anyhow::Result<()> {
+    // Start outbound connectors before serving HTTP. They're pure background
+    // consumers of the core (they subscribe to the ingest broadcast), so they run as
+    // detached tasks alongside the web server. `resolve` returns `Some` only when the
+    // connector is enabled and fully configured; otherwise we don't spawn anything.
+    if let Some(tg) = telegram::TelegramConfig::resolve(&core.config) {
+        tokio::spawn(telegram::run(core.clone(), tg));
+    }
+
     let data = web::Data::new(core);
     let (host, port) = (args.host.clone(), args.port);
     tracing::info!("starting HTTP server on http://{host}:{port}");
