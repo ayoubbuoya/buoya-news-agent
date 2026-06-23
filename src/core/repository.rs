@@ -87,6 +87,11 @@ pub struct DerivativesRow {
     /// exists; omitted otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub open_interest_usd_change_24h_pct: Option<f64>,
+    /// Percent change in mark price vs ~24h ago. Same provenance/conditions as
+    /// [`Self::open_interest_usd_change_24h_pct`]; pairs with it for the
+    /// open-interest-vs-price read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mark_price_change_24h_pct: Option<f64>,
 }
 
 /// Read access to the article store. Bundles the connection pool and embedder a
@@ -285,10 +290,10 @@ impl Repository {
 
         let mut out: Vec<DerivativesRow> = rows.iter().map(derivatives_row).collect();
 
-        // The most recent reading per symbol at least ~24h old, used as the OI
-        // change baseline. Absent for symbols without that much history yet.
+        // The most recent reading per symbol at least ~24h old, used as the OI and
+        // price change baseline. Absent for symbols without that much history yet.
         let reference = sqlx::query(
-            "SELECT d.symbol, d.open_interest_usd
+            "SELECT d.symbol, d.open_interest_usd, d.mark_price
              FROM derivatives d
              JOIN (SELECT symbol, MAX(id) AS rid
                    FROM derivatives
@@ -301,15 +306,15 @@ impl Repository {
         .context("failed to fetch derivatives 24h baseline")?;
 
         for row in out.iter_mut() {
-            let prior = reference.iter().find_map(|r| {
+            let Some(base) = reference.iter().find(|r| {
                 let sym: String = r.get("symbol");
-                (sym == row.symbol).then(|| r.get::<Option<f64>, _>("open_interest_usd"))
-            });
-            if let (Some(now), Some(Some(then))) = (row.open_interest_usd, prior)
-                && then != 0.0
-            {
-                row.open_interest_usd_change_24h_pct = Some((now - then) / then * 100.0);
-            }
+                sym == row.symbol
+            }) else {
+                continue;
+            };
+            row.open_interest_usd_change_24h_pct =
+                pct_change(row.open_interest_usd, base.get("open_interest_usd"));
+            row.mark_price_change_24h_pct = pct_change(row.mark_price, base.get("mark_price"));
         }
 
         Ok(out)
@@ -359,8 +364,18 @@ fn derivatives_row(row: &SqliteRow) -> DerivativesRow {
         top_trader_short_account: row.get("top_trader_short_account"),
         next_funding_time: row.get("next_funding_time"),
         fetched_at: row.get("fetched_at"),
-        // Derived (not a column); filled in by latest_derivatives, left None here.
+        // Derived (not columns); filled in by latest_derivatives, left None here.
         open_interest_usd_change_24h_pct: None,
+        mark_price_change_24h_pct: None,
+    }
+}
+
+/// Percent change from `then` to `now`, or `None` when either is absent or the
+/// baseline is zero.
+fn pct_change(now: Option<f64>, then: Option<f64>) -> Option<f64> {
+    match (now, then) {
+        (Some(now), Some(then)) if then != 0.0 => Some((now - then) / then * 100.0),
+        _ => None,
     }
 }
 

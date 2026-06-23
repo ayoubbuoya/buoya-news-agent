@@ -33,6 +33,16 @@ for what's new in an area use list_recent_articles. Then use get_article to read
 a promising result in depth. \
 For questions about market sentiment or mood, current prices or movers, or DeFi \
 TVL, call get_market_snapshot instead of searching the articles. \
+For crypto-futures positioning — open interest, funding rates, long/short ratios, \
+taker order flow — call get_derivatives. \
+When the user asks for an analysis, outlook, or \"what's going on with\" a specific \
+coin, call analyze_coin with that coin: it returns the derivatives signals, market \
+sentiment, and relevant news in one grounded dossier. Then write the analysis \
+strictly from that evidence and structure it as: a directional read (bullish / \
+bearish / neutral) with an explicit confidence level; the key drivers, each tied to \
+a specific number or cited article; the risks and any signals that conflict with \
+your read; and clear caveats for anything listed in the dossier's data_gaps. Never \
+invent prices, funding rates, or other figures — if a signal is missing, say so. \
 Ground your reply in what the tools return and cite article titles and sources. \
 If the database has nothing relevant, say so plainly instead of inventing \
 details. For general questions unrelated to stored data, answer directly without \
@@ -276,6 +286,12 @@ fn describe_call(name: &str, arguments: &str) -> String {
             .and_then(|v| v.as_i64())
             .map(|id| format!("#{id}")),
         "get_market_snapshot" => Some("sentiment, prices, TVL".to_string()),
+        "get_derivatives" => args
+            .get("symbol")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .or(Some("all symbols".to_string())),
+        "analyze_coin" => args.get("coin").and_then(|v| v.as_str()).map(str::to_string),
         _ => None,
     };
     match detail {
