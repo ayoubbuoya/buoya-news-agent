@@ -61,6 +61,23 @@ pub struct SnapshotItem {
     pub published_at: String,
 }
 
+/// One structured crypto-futures derivatives reading for a symbol (open interest,
+/// funding rate, long/short ratio, …) as stored in the `derivatives` table.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DerivativesRow {
+    pub id: i64,
+    pub symbol: String,
+    pub open_interest: Option<f64>,
+    pub open_interest_usd: Option<f64>,
+    pub funding_rate: Option<f64>,
+    pub mark_price: Option<f64>,
+    pub long_short_ratio: Option<f64>,
+    pub long_account: Option<f64>,
+    pub short_account: Option<f64>,
+    pub next_funding_time: Option<String>,
+    pub fetched_at: String,
+}
+
 /// Read access to the article store. Bundles the connection pool and embedder a
 /// query needs; cheap to construct (both fields are reference-counted handles).
 /// Build one via [`crate::core::Core::repository`].
@@ -237,6 +254,69 @@ impl Repository {
         }
 
         Ok(snapshots)
+    }
+
+    /// The latest derivatives reading for each tracked symbol — the current
+    /// open-interest / funding / long-short picture across the watchlist. Ordered by
+    /// USD open interest (largest first); symbols with no rows yet are absent.
+    pub async fn latest_derivatives(&self) -> Result<Vec<DerivativesRow>> {
+        let rows = sqlx::query(
+            "SELECT d.id, d.symbol, d.open_interest, d.open_interest_usd, d.funding_rate,
+                    d.mark_price, d.long_short_ratio, d.long_account, d.short_account,
+                    d.next_funding_time, d.fetched_at
+             FROM derivatives d
+             JOIN (SELECT symbol, MAX(id) AS max_id FROM derivatives GROUP BY symbol) latest
+               ON d.id = latest.max_id
+             ORDER BY d.open_interest_usd DESC",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to fetch latest derivatives")?;
+
+        Ok(rows.iter().map(derivatives_row).collect())
+    }
+
+    /// The recent history of derivatives readings for a single symbol, newest
+    /// first — for trend questions ("is funding rising on HBAR?"). Matches the
+    /// symbol case-insensitively so `hbarusdt` and `HBARUSDT` both work.
+    pub async fn derivatives_history(
+        &self,
+        symbol: &str,
+        limit: i64,
+    ) -> Result<Vec<DerivativesRow>> {
+        let rows = sqlx::query(
+            "SELECT id, symbol, open_interest, open_interest_usd, funding_rate,
+                    mark_price, long_short_ratio, long_account, short_account,
+                    next_funding_time, fetched_at
+             FROM derivatives
+             WHERE symbol = ? COLLATE NOCASE
+             ORDER BY id DESC
+             LIMIT ?",
+        )
+        .bind(symbol)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .context("failed to fetch derivatives history")?;
+
+        Ok(rows.iter().map(derivatives_row).collect())
+    }
+}
+
+/// Project a `derivatives` row into [`DerivativesRow`].
+fn derivatives_row(row: &SqliteRow) -> DerivativesRow {
+    DerivativesRow {
+        id: row.get("id"),
+        symbol: row.get("symbol"),
+        open_interest: row.get("open_interest"),
+        open_interest_usd: row.get("open_interest_usd"),
+        funding_rate: row.get("funding_rate"),
+        mark_price: row.get("mark_price"),
+        long_short_ratio: row.get("long_short_ratio"),
+        long_account: row.get("long_account"),
+        short_account: row.get("short_account"),
+        next_funding_time: row.get("next_funding_time"),
+        fetched_at: row.get("fetched_at"),
     }
 }
 

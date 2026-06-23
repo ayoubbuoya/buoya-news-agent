@@ -2,7 +2,10 @@ use anyhow::Context;
 use sqlx::Row;
 
 use crate::core::repository::ArticleSummary;
-use crate::core::{Core, embeddings, fetchers, types::RawItem};
+use crate::core::{
+    Core, embeddings, fetchers,
+    types::{DerivativesSnapshot, RawItem},
+};
 
 /// Max characters of an article fed to the embedder. BGE-small truncates around
 /// ~512 tokens; this keeps us comfortably under that while capturing title +
@@ -59,6 +62,20 @@ pub async fn run(app_state: &Core) -> usize {
             Ok(items) => new_articles.extend(store_items(app_state, &items).await),
             Err(e) => tracing::error!("Failed to fetch fear & greed index: {}", e),
         }
+    }
+
+    // --- Binance futures derivatives (keyless) ---
+    // Structured numeric data, not articles: it goes straight to the `derivatives`
+    // table and is not embedded or broadcast as an article alert.
+    if cfg.sources.derivatives.enabled {
+        let snapshots = fetchers::binance_futures::fetch_derivatives(
+            &app_state.http_client,
+            &cfg.sources.derivatives.symbols,
+            &cfg.sources.derivatives.long_short_period,
+        )
+        .await;
+        let stored = store_derivatives(app_state, &snapshots).await;
+        tracing::debug!("stored {stored} derivatives readings");
     }
 
     let new_stored = new_articles.len();
@@ -139,6 +156,39 @@ async fn store_items(app_state: &Core, items: &[RawItem]) -> Vec<ArticleSummary>
         tracing::error!("failed to store embeddings: {e:#}");
     }
 
+    stored
+}
+
+/// Persist a batch of derivatives snapshots, one row each. Unlike articles these
+/// are append-only time-series points (no dedup), so a fresh row is written every
+/// tick. Returns the number of rows stored.
+async fn store_derivatives(app_state: &Core, snapshots: &[DerivativesSnapshot]) -> usize {
+    let mut stored = 0usize;
+    for s in snapshots {
+        let next_funding = s.next_funding_time.map(|t| t.to_rfc3339());
+        let result = sqlx::query(
+            "INSERT INTO derivatives
+                (symbol, open_interest, open_interest_usd, funding_rate, mark_price,
+                 long_short_ratio, long_account, short_account, next_funding_time)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&s.symbol)
+        .bind(s.open_interest)
+        .bind(s.open_interest_usd)
+        .bind(s.funding_rate)
+        .bind(s.mark_price)
+        .bind(s.long_short_ratio)
+        .bind(s.long_account)
+        .bind(s.short_account)
+        .bind(&next_funding)
+        .execute(&app_state.db_pool)
+        .await;
+
+        match result {
+            Ok(_) => stored += 1,
+            Err(e) => tracing::error!("Failed to insert derivatives for {}: {}", s.symbol, e),
+        }
+    }
     stored
 }
 

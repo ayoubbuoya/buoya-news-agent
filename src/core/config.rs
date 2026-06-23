@@ -33,6 +33,7 @@ pub struct Sources {
     pub reddit: RedditSource,
     pub arxiv: ArxivSource,
     pub huggingface: HuggingfaceSource,
+    pub derivatives: DerivativesSource,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -140,6 +141,39 @@ pub struct HuggingfaceSource {
 impl Default for HuggingfaceSource {
     fn default() -> Self {
         Self { enabled: true }
+    }
+}
+
+/// Crypto-futures derivatives metrics (open interest, funding rate, long/short
+/// ratio) pulled per symbol from Binance's keyless USDⓈ-M public API. These are the
+/// numbers market makers watch; stored structured (not as articles) in the
+/// `derivatives` table.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DerivativesSource {
+    pub enabled: bool,
+    /// Perpetual contract symbols to track, in Binance's exchange notation (e.g.
+    /// `"BTCUSDT"`, `"HBARUSDT"`). Not the same as `general.watchlist`, which mixes
+    /// coin names and tickers — derivatives need exact exchange symbols.
+    pub symbols: Vec<String>,
+    /// Aggregation period for the long/short-ratio endpoint. Binance accepts
+    /// `5m`, `15m`, `30m`, `1h`, `2h`, `4h`, `6h`, `12h`, `1d`.
+    pub long_short_period: String,
+}
+
+impl Default for DerivativesSource {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            symbols: vec![
+                "BTCUSDT".into(),
+                "ETHUSDT".into(),
+                "SOLUSDT".into(),
+                "HBARUSDT".into(),
+                "XLMUSDT".into(),
+            ],
+            long_short_period: "5m".into(),
+        }
     }
 }
 
@@ -256,14 +290,28 @@ impl TomlConfig {
         // `serve` wiring handles a missing token by simply not starting the connector.
         if self.connectors.telegram.enabled && self.connectors.telegram.chat_id.trim().is_empty() {
             return Err(inv(
-                "connectors.telegram is enabled but chat_id is empty".into(),
+                "connectors.telegram is enabled but chat_id is empty".into()
+            ));
+        }
+        if self.sources.derivatives.enabled && self.sources.derivatives.symbols.is_empty() {
+            return Err(inv(
+                "sources.derivatives is enabled but symbols is empty".into()
+            ));
+        }
+        if self.sources.derivatives.enabled
+            && self.sources.derivatives.long_short_period.trim().is_empty()
+        {
+            return Err(inv(
+                "sources.derivatives is enabled but long_short_period is empty".into(),
             ));
         }
         if !self.any_source_enabled() {
             return Err(inv("at least one source must be enabled".into()));
         }
         if self.general.ingest_interval_secs == 0 {
-            return Err(inv("general.ingest_interval_secs must be greater than 0".into()));
+            return Err(inv(
+                "general.ingest_interval_secs must be greater than 0".into()
+            ));
         }
         Ok(())
     }
@@ -277,6 +325,7 @@ impl TomlConfig {
             || self.sources.reddit.enabled
             || self.sources.arxiv.enabled
             || self.sources.huggingface.enabled
+            || self.sources.derivatives.enabled
     }
 }
 
@@ -300,8 +349,7 @@ impl AppConfig {
             .map_err(|_| anyhow::anyhow!("AI_API_KEY env var not set"))?;
         let ai_base_url =
             std::env::var("AI_BASE_URL").unwrap_or(String::from("https://openrouter.ai/api/v1"));
-        let ai_model =
-            std::env::var("AI_MODEL").unwrap_or(String::from("openai/gpt-oss-20b:free"));
+        let ai_model = std::env::var("AI_MODEL").unwrap_or(String::from("openai/gpt-oss-20b:free"));
         let toml_config = TomlConfig::load(toml_config_path)?;
 
         // Optional: only present when the user wants the Telegram connector. A blank
@@ -320,6 +368,3 @@ impl AppConfig {
         })
     }
 }
-
-
-

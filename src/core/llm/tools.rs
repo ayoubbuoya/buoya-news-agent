@@ -159,6 +159,39 @@ fn registry() -> Vec<Tool> {
             },
             handler: |repo, args| Box::pin(get_market_snapshot(repo, args)),
         },
+        Tool {
+            name: "get_derivatives",
+            description: "Get crypto perpetual-futures derivatives metrics that market makers \
+                 watch: open interest (contracts and USD notional), funding rate, mark \
+                 price, and the long/short account ratio, per tracked symbol (e.g. \
+                 BTCUSDT, HBARUSDT). With no arguments, returns the latest reading for \
+                 every tracked symbol. Pass `symbol` to get that symbol's recent history \
+                 instead (newest first) for trend questions like \"is funding rising on \
+                 ETH?\". Use this for positioning, leverage, and funding questions — not \
+                 get_market_snapshot (spot prices/sentiment/TVL) or search_articles.",
+            parameters: || {
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Optional exchange symbol (e.g. \"HBARUSDT\"). When set, \
+                                returns this symbol's recent history newest-first; when omitted, \
+                                returns the latest reading for all tracked symbols."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "When `symbol` is set, how many historical readings to \
+                                return (1-50).",
+                            "minimum": 1,
+                            "maximum": MAX_LIMIT
+                        }
+                    },
+                    "required": []
+                })
+            },
+            handler: |repo, args| Box::pin(get_derivatives(repo, args)),
+        },
     ]
 }
 
@@ -291,4 +324,25 @@ async fn get_article(repo: &Repository, arguments: &str) -> Result<Value> {
 async fn get_market_snapshot(repo: &Repository, _arguments: &str) -> Result<Value> {
     let snapshots = repo.market_snapshot().await?;
     Ok(json!({ "count": snapshots.len(), "snapshots": snapshots }))
+}
+
+async fn get_derivatives(repo: &Repository, arguments: &str) -> Result<Value> {
+    let args = parse_args(arguments)?;
+    let symbol = args
+        .get("symbol")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    match symbol {
+        Some(symbol) => {
+            let limit = resolve_limit(&args);
+            let history = repo.derivatives_history(symbol, limit).await?;
+            Ok(json!({ "symbol": symbol, "count": history.len(), "readings": history }))
+        }
+        None => {
+            let latest = repo.latest_derivatives().await?;
+            Ok(json!({ "count": latest.len(), "derivatives": latest }))
+        }
+    }
 }

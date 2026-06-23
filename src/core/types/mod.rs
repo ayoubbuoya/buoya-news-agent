@@ -69,6 +69,33 @@ pub struct ChatMessage {
     pub tools_used: Vec<String>,
 }
 
+/// A point-in-time derivatives reading for one perpetual-futures symbol, as
+/// returned by the Binance-futures fetcher. Numeric, not article-shaped — stored
+/// in its own `derivatives` table. Every metric is optional so a partial endpoint
+/// failure still records what we did get.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DerivativesSnapshot {
+    /// Exchange symbol, e.g. `"HBARUSDT"`.
+    pub symbol: String,
+    /// Open interest in base-asset units (contracts).
+    pub open_interest: Option<f64>,
+    /// Open interest in USD notional (`open_interest * mark_price`), computed when
+    /// both inputs are present.
+    pub open_interest_usd: Option<f64>,
+    /// Latest funding rate as a fraction (e.g. `0.0001` = 0.01%).
+    pub funding_rate: Option<f64>,
+    /// Mark price in USD.
+    pub mark_price: Option<f64>,
+    /// Long/short account ratio (longAccount / shortAccount). >1 = more longs.
+    pub long_short_ratio: Option<f64>,
+    /// Fraction of accounts net long (0..1).
+    pub long_account: Option<f64>,
+    /// Fraction of accounts net short (0..1).
+    pub short_account: Option<f64>,
+    /// Next funding settlement time, RFC 3339.
+    pub next_funding_time: Option<DateTime<Utc>>,
+}
+
 /// What a fetcher returns: minimal, source-shaped, not yet scored or stored.
 #[derive(Debug, Clone)]
 pub struct RawItem {

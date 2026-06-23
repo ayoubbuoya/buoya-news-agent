@@ -63,6 +63,34 @@ pub async fn init_db() -> Result<SqlitePool> {
         tracing::debug!("vec_articles creation skipped (likely exists): {e}");
     }
 
+    // Structured crypto-futures derivatives readings, one row per (symbol, tick).
+    // Numeric and time-stamped so trends are queryable — distinct from the text
+    // `articles` store. Written by the Binance-futures fetcher each ingest tick.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS derivatives (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol            TEXT NOT NULL,
+            open_interest     REAL,
+            open_interest_usd REAL,
+            funding_rate      REAL,
+            mark_price        REAL,
+            long_short_ratio  REAL,
+            long_account      REAL,
+            short_account     REAL,
+            next_funding_time TEXT,
+            fetched_at        TEXT NOT NULL DEFAULT (datetime('now'))
+         );",
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_derivatives_symbol
+         ON derivatives(symbol, fetched_at DESC);",
+    )
+    .execute(&pool)
+    .await?;
+
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS chat_sessions (
             id          TEXT PRIMARY KEY,
@@ -118,13 +146,12 @@ pub async fn create_session(pool: &SqlitePool, title: &str) -> Result<ChatSessio
         .await
         .context("failed to insert chat session")?;
 
-    let row = sqlx::query(
-        "SELECT id, title, created_at, updated_at FROM chat_sessions WHERE id = ?",
-    )
-    .bind(&id)
-    .fetch_one(pool)
-    .await
-    .context("failed to read back created session")?;
+    let row =
+        sqlx::query("SELECT id, title, created_at, updated_at FROM chat_sessions WHERE id = ?")
+            .bind(&id)
+            .fetch_one(pool)
+            .await
+            .context("failed to read back created session")?;
 
     Ok(ChatSession {
         id: row.get("id"),
@@ -158,13 +185,12 @@ pub async fn list_sessions(pool: &SqlitePool) -> Result<Vec<ChatSession>> {
 
 /// Fetch a single session by id, or `None` if it doesn't exist.
 pub async fn get_session(pool: &SqlitePool, session_id: &str) -> Result<Option<ChatSession>> {
-    let row = sqlx::query(
-        "SELECT id, title, created_at, updated_at FROM chat_sessions WHERE id = ?",
-    )
-    .bind(session_id)
-    .fetch_optional(pool)
-    .await
-    .context("failed to fetch chat session")?;
+    let row =
+        sqlx::query("SELECT id, title, created_at, updated_at FROM chat_sessions WHERE id = ?")
+            .bind(session_id)
+            .fetch_optional(pool)
+            .await
+            .context("failed to fetch chat session")?;
 
     Ok(row.map(|row| ChatSession {
         id: row.get("id"),
@@ -188,7 +214,9 @@ pub async fn delete_session(pool: &SqlitePool, session_id: &str) -> Result<()> {
         .execute(&mut *tx)
         .await
         .context("failed to delete session")?;
-    tx.commit().await.context("failed to commit session delete")?;
+    tx.commit()
+        .await
+        .context("failed to commit session delete")?;
     Ok(())
 }
 
@@ -258,13 +286,11 @@ pub async fn insert_message(
 
     touch_session(pool, session_id).await?;
 
-    let row = sqlx::query(
-        "SELECT created_at FROM chat_messages WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_one(pool)
-    .await
-    .context("failed to read back inserted message")?;
+    let row = sqlx::query("SELECT created_at FROM chat_messages WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .context("failed to read back inserted message")?;
 
     Ok(ChatMessage {
         id,
@@ -326,9 +352,14 @@ mod tests {
     fn register_vec() {
         #[allow(unsafe_code)]
         unsafe {
-            libsqlite3_sys::sqlite3_auto_extension(Some(std::mem::transmute(
-                sqlite_vec::sqlite3_vec_init as *const (),
-            )));
+            libsqlite3_sys::sqlite3_auto_extension(Some(std::mem::transmute::<
+                *const (),
+                unsafe extern "C" fn(
+                    *mut libsqlite3_sys::sqlite3,
+                    *mut *mut std::os::raw::c_char,
+                    *const libsqlite3_sys::sqlite3_api_routines,
+                ) -> std::os::raw::c_int,
+            >(sqlite_vec::sqlite3_vec_init as *const ())));
         }
     }
 
