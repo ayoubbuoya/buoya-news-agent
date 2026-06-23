@@ -1,4 +1,5 @@
-//! System routes: liveness and the not-yet-implemented MCP placeholder.
+//! System routes: liveness. The MCP endpoint is mounted separately by
+//! [`crate::server::mcp`], not here.
 
 use actix_web::{HttpResponse, web};
 use serde::Serialize;
@@ -27,13 +28,6 @@ pub async fn health() -> HttpResponse {
     })
 }
 
-/// Placeholder for the MCP-over-HTTP endpoint mounted here in a later step.
-pub async fn mcp_stub() -> HttpResponse {
-    HttpResponse::NotImplemented()
-        .json(serde_json::json!({ "error": "MCP endpoint not yet implemented" }))
-}
-
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.route("/health", web::get().to(health))
-        .route("/mcp", web::to(mcp_stub));
+    cfg.route("/health", web::get().to(health));
 }

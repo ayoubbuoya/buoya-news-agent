@@ -7,13 +7,15 @@
 //! Routes fall into three groups: persisted **chat sessions** that mirror the TUI
 //! (`/sessions`, `/sessions/{id}/chat`), read-only **data** routes over
 //! [`Core::repository`] (`/articles`, `/market/snapshot`), and **system** routes
-//! (`/health`, the `/mcp` placeholder). The shared [`Core`] lives in `web::Data` so
-//! every worker shares one pool, embedder, and client.
+//! (`/health`). The agent's tools are also exposed over MCP at `/mcp` (see
+//! [`mcp`]). The shared [`Core`] lives in `web::Data` so every worker shares one
+//! pool, embedder, and client.
 //!
 //! Interactive API docs are served by Swagger UI at `/swagger-ui/`, backed by the
 //! generated OpenAPI document at `/api-docs/openapi.json`.
 
 mod error;
+mod mcp;
 mod openapi;
 mod routes;
 
@@ -47,19 +49,38 @@ pub async fn run(core: Core, args: ServeArgs) -> anyhow::Result<()> {
         tokio::spawn(telegram::run(core.clone(), tg));
     }
 
+    // The MCP server reuses the agent's tools over Streamable HTTP at `/mcp`. Its
+    // bearer token is a secret, so it comes from the environment (like the Telegram
+    // token), not `ServeArgs`. With no token the endpoint is open — fine for a
+    // loopback `serve`, but set `MCP_AUTH_TOKEN` before exposing it via a tunnel.
+    let mcp_token = std::env::var("MCP_AUTH_TOKEN")
+        .ok()
+        .filter(|token| !token.trim().is_empty());
+    let mcp_data = web::Data::new(mcp::build_state(core.clone(), mcp_token.clone()));
+
     let data = web::Data::new(core);
     let (host, port) = (args.host.clone(), args.port);
     tracing::info!("starting HTTP server on http://{host}:{port}");
     tracing::info!("API docs available at http://{host}:{port}/swagger-ui/");
+    if mcp_token.is_some() {
+        tracing::info!("MCP (Streamable HTTP) at http://{host}:{port}/mcp — bearer auth enabled");
+    } else {
+        tracing::warn!(
+            "MCP (Streamable HTTP) at http://{host}:{port}/mcp — no auth; set MCP_AUTH_TOKEN \
+             before exposing it"
+        );
+    }
 
     HttpServer::new(move || {
         App::new()
             .app_data(data.clone())
+            .app_data(mcp_data.clone())
             // Permissive CORS: this is a local, single-user backend, and a browser
             // frontend (dev server or separate origin) must be able to call it. If
             // this is ever exposed to untrusted networks, tighten to known origins.
             .wrap(Cors::permissive())
             .configure(routes::configure)
+            .configure(mcp::configure)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),

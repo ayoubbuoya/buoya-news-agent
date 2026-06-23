@@ -63,6 +63,12 @@ rmcp = { version = "1.7.0", features = ["server", "transport-streamable-http-ser
 utoipa = { version = "5.5.0", features = ["actix_extras", "chrono"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["actix-web", "vendored"] }
 actix-cors = "0.7.1"
+# rmcp speaks the `http` 1.x ecosystem; actix-web still speaks `http` 0.2. These let
+# the `/mcp` bridge name the 1.x request/response types and stream rmcp's body back
+# through actix. `bytes` is already unified across both, so bodies stay zero-copy.
+http = "1.4"
+http-body-util = "0.1.3"
+bytes = "1"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

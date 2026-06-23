@@ -1,5 +1,8 @@
 pub mod curator;
-mod tools;
+// Public so adapters other than the OpenAI chat loop — notably the MCP server in
+// `crate::server::mcp` — can advertise (`tool_infos`) and run (`execute`) the same
+// tools. The registry stays the single source of truth.
+pub mod tools;
 
 use anyhow::Result;
 use async_openai::config::OpenAIConfig;
